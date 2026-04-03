@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { FlaskConical, Upload as UploadIcon, FileSpreadsheet, Loader2 } from "lucide-react";
+import { FlaskConical, Upload as UploadIcon, FileSpreadsheet, Loader2, Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export default function UploadPage() {
   const [, navigate] = useLocation();
@@ -81,7 +82,17 @@ export default function UploadPage() {
           <div className="space-y-3">
             <UploadIcon className="w-10 h-10 mx-auto" style={{ color: "#666" }} />
             <p className="text-lg font-medium" style={{ color: "#F5F5F5" }}>Drop your COA here</p>
-            <p className="text-sm" style={{ color: "#666" }}>PDF or CSV</p>
+            <div className="flex items-center justify-center gap-1.5">
+              <p className="text-sm" style={{ color: "#666" }}>PDF or CSV</p>
+              <Tooltip>
+                <TooltipTrigger asChild onClick={(e) => e.stopPropagation()}>
+                  <Info className="w-3.5 h-3.5 cursor-help" style={{ color: "#666" }} />
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-[240px] text-xs" style={{ background: "#1A1A1B", color: "#CCC", border: "1px solid #2A2A2A" }}>
+                  <p>Single COA as PDF, or a CSV with up to 50 products. Download the template below for the expected format.</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <p className="text-xs" style={{ color: "#C8FF00" }}>or click to browse</p>
           </div>
         )}

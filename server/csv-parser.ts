@@ -105,6 +105,8 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
+export const MAX_CSV_ROWS = 50;
+
 export function parseCSV(csvContent: string): ParsedLabResult[] {
   const lines = csvContent
     .split("\n")
@@ -112,6 +114,12 @@ export function parseCSV(csvContent: string): ParsedLabResult[] {
     .filter(Boolean);
 
   if (lines.length < 2) return [];
+
+  // Enforce row limit (header + data rows)
+  const dataRowCount = lines.length - 1;
+  if (dataRowCount > MAX_CSV_ROWS) {
+    throw new Error(`CSV contains ${dataRowCount} rows. Maximum is ${MAX_CSV_ROWS} per upload.`);
+  }
 
   // Find header row (first non-empty row)
   // Handle multi-line headers by merging consecutive header lines before data
