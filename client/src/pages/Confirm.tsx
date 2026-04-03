@@ -1,0 +1,175 @@
+import { useState } from "react";
+import { useLocation, useRoute } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import type { LabResult } from "@shared/schema";
+
+function TerpeneBar({ name, value, max }: { name: string; value: number; max: number }) {
+  const pct = Math.min((value / max) * 100, 100);
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="w-28 truncate text-right" style={{ color: "#F5F5F5" }}>{name}</span>
+      <div className="flex-1 h-4 rounded" style={{ background: "#2A2A2A" }}>
+        <div className="h-full rounded transition-all" style={{ width: `${pct}%`, background: `hsl(73 100% ${50 + (1 - value / max) * 20}%)` }} />
+      </div>
+      <span className="w-14 text-right font-mono" style={{ color: "#C8FF00" }}>{value.toFixed(2)}%</span>
+    </div>
+  );
+}
+
+function CannabinoidBar({ name, value, color }: { name: string; value: number; color: string }) {
+  if (value <= 0) return null;
+  const maxDisplay = Math.max(value, 5);
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="w-16 truncate text-right" style={{ color: "#F5F5F5" }}>{name}</span>
+      <div className="flex-1 h-4 rounded" style={{ background: "#2A2A2A" }}>
+        <div className="h-full rounded" style={{ width: `${Math.min((value / maxDisplay) * 100, 100)}%`, background: color, minWidth: value > 0 ? "4px" : 0 }} />
+      </div>
+      <span className="w-14 text-right font-mono" style={{ color: "#F5F5F5" }}>{value.toFixed(2)}%</span>
+    </div>
+  );
+}
+
+export default function ConfirmPage() {
+  const [, navigate] = useLocation();
+  const [, params] = useRoute("/confirm/:id");
+  const id = params?.id || "";
+
+  const { data: result, isLoading } = useQuery<LabResult>({
+    queryKey: ["/api/results", id],
+    queryFn: async () => { const r = await apiRequest("GET", `/api/results/${id}`); return r.json(); },
+    enabled: !!id,
+  });
+
+  const [productName, setProductName] = useState("");
+  const [strainName, setStrainName] = useState("");
+  const [productType, setProductType] = useState("");
+  const [brandName, setBrandName] = useState("");
+  const [inited, setInited] = useState(false);
+
+  if (result && !inited) {
+    setProductName(result.productName || "");
+    setStrainName(result.strainName || "");
+    setProductType(result.productType || "flower");
+    setBrandName(result.brandName || "");
+    setInited(true);
+  }
+
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      // First update the result with any edits
+      await apiRequest("PATCH", `/api/results/${id}`, { productName, strainName, productType, brandName });
+      // Then generate descriptions
+      const res = await apiRequest("POST", `/api/results/${id}/generate`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/results", id] });
+      navigate(`/detail/${id}`);
+    },
+  });
+
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" style={{ color: "#C8FF00" }} /></div>;
+  if (!result) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ color: "#999" }}>Result not found</div>;
+
+  const cannabinoids = JSON.parse(result.cannabinoids || "{}");
+  const terpenes = JSON.parse(result.terpenes || "{}");
+  const sortedTerpenes = Object.entries(terpenes).filter(([, v]) => (v as number) > 0).sort(([, a], [, b]) => (b as number) - (a as number)).slice(0, 6);
+  const maxTerp = sortedTerpenes.length > 0 ? (sortedTerpenes[0][1] as number) : 1;
+
+  const cannabinoidEntries = [
+    { name: "THC", value: cannabinoids.thc || cannabinoids.d9thc || 0, color: "#C8FF00" },
+    { name: "THCA", value: cannabinoids.thca || 0, color: "#a8d900" },
+    { name: "CBD", value: cannabinoids.cbd || 0, color: "#4A9EFF" },
+    { name: "CBDA", value: cannabinoids.cbda || 0, color: "#3A7ECC" },
+    { name: "CBG", value: cannabinoids.cbg || 0, color: "#CA6641" },
+    { name: "THCV", value: cannabinoids.thcv || 0, color: "#E8A838" },
+    { name: "CBN", value: cannabinoids.cbn || 0, color: "#9B59B6" },
+    { name: "CBC", value: cannabinoids.cbc || 0, color: "#1ABC9C" },
+    { name: "CBT", value: cannabinoids.cbt || 0, color: "#95A5A6" },
+  ].filter(c => c.value > 0);
+
+  return (
+    <div className="min-h-screen p-6" style={{ background: "#0A0A0B" }}>
+      <div className="max-w-4xl mx-auto">
+        <button onClick={() => navigate("/")} className="flex items-center gap-1 text-xs mb-6 hover:opacity-80" style={{ color: "#999" }}>
+          <ArrowLeft className="w-3 h-3" /> Back to Upload
+        </button>
+
+        <h1 className="text-xl font-bold mb-1" style={{ color: "#F5F5F5" }}>Confirm Lab Results</h1>
+        <p className="text-sm mb-6" style={{ color: "#999" }}>Verify the parsed data before generating content</p>
+
+        <div className="grid md:grid-cols-2 gap-4 mb-6">
+          <Card style={{ background: "#1A1A1B", borderColor: "#2A2A2A" }}>
+            <CardHeader className="pb-3"><CardTitle className="text-sm" style={{ color: "#F5F5F5" }}>Cannabinoid Profile</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex gap-4 mb-3 text-xs" style={{ color: "#999" }}>
+                <span>Total THC: <b style={{ color: "#C8FF00" }}>{result.totalThc?.toFixed(1)}%</b></span>
+                <span>Total Cannabinoids: <b style={{ color: "#F5F5F5" }}>{result.totalCannabinoids?.toFixed(1)}%</b></span>
+              </div>
+              {cannabinoidEntries.map(c => <CannabinoidBar key={c.name} {...c} />)}
+            </CardContent>
+          </Card>
+
+          <Card style={{ background: "#1A1A1B", borderColor: "#2A2A2A" }}>
+            <CardHeader className="pb-3"><CardTitle className="text-sm" style={{ color: "#F5F5F5" }}>Dominant Terpenes</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              <div className="text-xs mb-3" style={{ color: "#999" }}>Total Terpenes: <b style={{ color: "#C8FF00" }}>{result.totalTerpenes?.toFixed(2)}%</b></div>
+              {sortedTerpenes.map(([name, value]) => (
+                <TerpeneBar key={name} name={name} value={value as number} max={maxTerp} />
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="mb-6" style={{ background: "#1A1A1B", borderColor: "#2A2A2A" }}>
+          <CardContent className="pt-4 grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium mb-1 block" style={{ color: "#999" }}>Product Name</label>
+              <Input value={productName} onChange={e => setProductName(e.target.value)} className="bg-[#0A0A0B] border-[#2A2A2A] text-[#F5F5F5]" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block" style={{ color: "#999" }}>Strain Name</label>
+              <Input value={strainName} onChange={e => setStrainName(e.target.value)} className="bg-[#0A0A0B] border-[#2A2A2A] text-[#F5F5F5]" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block" style={{ color: "#999" }}>Product Type</label>
+              <Select value={productType} onValueChange={setProductType}>
+                <SelectTrigger className="bg-[#0A0A0B] border-[#2A2A2A] text-[#F5F5F5]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="flower">Flower</SelectItem>
+                  <SelectItem value="vape">Vape Cartridge</SelectItem>
+                  <SelectItem value="concentrate">Concentrate</SelectItem>
+                  <SelectItem value="edible">Edible</SelectItem>
+                  <SelectItem value="pre-roll">Pre-Roll</SelectItem>
+                  <SelectItem value="topical">Topical</SelectItem>
+                  <SelectItem value="tincture">Tincture</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block" style={{ color: "#999" }}>Brand</label>
+              <Input value={brandName} onChange={e => setBrandName(e.target.value)} className="bg-[#0A0A0B] border-[#2A2A2A] text-[#F5F5F5]" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Button
+          className="w-full h-12 text-sm font-semibold"
+          style={{ background: "#C8FF00", color: "#0A0A0B" }}
+          onClick={() => generateMutation.mutate()}
+          disabled={generateMutation.isPending}
+          data-testid="button-generate"
+        >
+          {generateMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating Descriptions...</> : <><Sparkles className="w-4 h-4 mr-2" /> Confirm & Generate Descriptions</>}
+        </Button>
+      </div>
+    </div>
+  );
+}
