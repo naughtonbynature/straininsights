@@ -8,7 +8,8 @@ export function BrandBar() {
 
   const brandName = brandGuide?.companyName || brandGuide?.brandName;
   const connected = !!context?.userId;
-  const accentColor = brandGuide?.colorAccent || brandGuide?.colorPrimary;
+  const vi = brandGuide?.visualIdentity;
+  const accentColor = vi?.colors?.[0] || brandGuide?.colorAccent || brandGuide?.colorPrimary;
 
   return (
     <div
