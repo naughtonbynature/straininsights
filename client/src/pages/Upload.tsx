@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { FlaskConical, Upload as UploadIcon, FileSpreadsheet, Loader2, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { apiRequest, API_BASE } from "@/lib/queryClient";
 
 export default function UploadPage() {
   const [, navigate] = useLocation();
@@ -19,14 +20,14 @@ export default function UploadPage() {
       formData.append("file", file);
 
       // Step 1: Parse the file
-      const parseRes = await fetch("./api/upload", { method: "POST", body: formData });
+      const parseRes = await fetch(`${API_BASE}/api/upload`, { method: "POST", body: formData });
       const parseData = await parseRes.json();
       if (!parseRes.ok) { setError(parseData.message || "Upload failed"); setUploading(false); return; }
 
       const { results: parsed, sourceType, sourceFilename } = parseData;
 
       // Step 2: Save all results
-      const saveRes = await fetch("./api/results", {
+      const saveRes = await fetch(`${API_BASE}/api/results`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ results: parsed, sourceType, sourceFilename }),
@@ -101,7 +102,16 @@ export default function UploadPage() {
       {error && <p className="text-red-400 text-sm mt-4">{error}</p>}
 
       <div className="flex items-center gap-4 mt-6">
-        <Button variant="outline" size="sm" className="text-xs" onClick={() => window.open("./api/template.csv")} data-testid="button-download-template">
+        <Button variant="outline" size="sm" className="text-xs" onClick={async () => {
+          try {
+            const res = await apiRequest("GET", "/api/template.csv");
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = "straininsights-template.csv";
+            a.click(); URL.revokeObjectURL(url);
+          } catch {}
+        }} data-testid="button-download-template">
           <FileSpreadsheet className="w-3 h-3 mr-1" /> Download CSV Template
         </Button>
       </div>

@@ -2,7 +2,11 @@ import { normalizeTerpeneName } from "./terpene-knowledge.js";
 import type { ParsedLabResult } from "./pdf-parser.js";
 
 // Column mapping: normalized key -> possible CSV column names
+// Our template uses clean headers like "THC (% w/w)", but we also accept
+// CCA lab format ("SC - THC (% w/w)") and simple headers ("THC %").
+// Order matters — first match wins.
 const COLUMN_MAP: Record<string, string[]> = {
+  // Product info
   productName: ["product name", "product", "name", "sample name", "item name"],
   strainName: ["strain name", "strain", "cultivar"],
   productType: ["product type", "type", "category", "matrix"],
@@ -11,41 +15,63 @@ const COLUMN_MAP: Record<string, string[]> = {
   testDate: ["test date", "date", "sample date", "analysis date", "date tested"],
   labName: ["lab name", "lab", "laboratory", "testing lab"],
 
-  // Cannabinoids
-  totalThc: ["total thc %", "total thc", "total thc (% w/w)", "sc - total thc (% w/w)", "thc total", "%thc total"],
-  totalCbd: ["total cbd %", "total cbd", "total cbd (% w/w)", "sc - total cbd (% w/w)", "cbd total"],
-  totalCannabinoids: ["total cannabinoids %", "total cannabinoids", "total cannabinoids (% w/w)"],
-  thc: ["thc %", "thc", "delta9-thc %", "d9-thc %", "δ9-thc %", "sc - thc (% w/w)"],
-  thca: ["thca %", "thca", "sc - thca (% w/w)"],
-  cbd: ["cbd %", "cbd", "sc - cbd (% w/w)"],
-  cbda: ["cbda %", "cbda", "sc - cbda (% w/w)"],
-  cbg: ["cbg %", "cbg", "sc - cbg (% w/w)"],
-  cbga: ["cbga %", "cbga"],
-  cbn: ["cbn %", "cbn", "sc - cbn (% w/w)"],
-  thcv: ["thcv %", "thcv", "sc - thcv (% w/w)"],
-  cbc: ["cbc %", "cbc", "sc - cbc (% w/w)"],
-
-  // Terpenes
-  totalTerpenes: ["total terpenes %", "total terpenes", "total terpenes (% w/w)"],
-  limonene: ["limonene %", "limonene", "d-limonene %", "d-limonene"],
-  myrcene: ["myrcene %", "myrcene", "β-myrcene %", "beta-myrcene %", "b-myrcene %"],
-  caryophyllene: [
-    "beta-caryophyllene %",
-    "β-caryophyllene %",
-    "caryophyllene %",
-    "b-caryophyllene %",
+  // Cannabinoids — clean format, then CCA "SC-" prefix, then simple
+  totalThc: [
+    "total thc active - (% w/w)", "total thc (% w/w)",
+    "sc- total thc active - (% w/w)", "sc- total thc (% w/w)",
+    "total thc %", "total thc", "thc total",
   ],
-  humulene: ["alpha-humulene %", "α-humulene %", "humulene %", "a-humulene %"],
-  linalool: ["linalool %", "linalool"],
-  "alpha-pinene": ["alpha-pinene %", "α-pinene %", "a-pinene %", "α-pinene %"],
-  "beta-pinene": ["beta-pinene %", "β-pinene %", "b-pinene %"],
-  terpinolene: ["terpinolene %", "terpinolene"],
-  ocimene: ["ocimene %", "ocimene", "β-ocimene %", "b-ocimene %"],
-  bisabolol: ["bisabolol %", "α-bisabolol %", "a-bisabolol %", "bisabolol"],
-  fenchol: ["fenchol %", "fenchol"],
-  nerolidol: ["nerolidol %", "nerolidol", "trans-nerolidol %"],
-  guaiol: ["guaiol %", "guaiol"],
-  camphene: ["camphene %", "camphene"],
+  totalCbd: [
+    "total cbd active - (% w/w)", "total cbd (% w/w)",
+    "sc- total cbd active - (% w/w)", "sc- total cbd (% w/w)",
+    "total cbd %", "total cbd", "cbd total",
+  ],
+  totalCannabinoids: [
+    "sum can (% w/w)", "sc- sum can (% w/w)",
+    "total cannabinoids %", "total cannabinoids", "total cannabinoids (% w/w)",
+  ],
+  thc: ["thc (% w/w)", "sc - thc (% w/w)", "thc %", "thc", "delta9-thc %", "d9-thc %"],
+  d8thc: ["d8 (% w/w)", "sc- d8 (% w/w)", "d8-thc %", "d8 thc %", "delta8-thc %"],
+  thca: ["thca (% w/w)", "sc - thca (% w/w)", "thca %", "thca"],
+  cbd: ["cbd (% w/w)", "sc- cbd (% w/w)", "cbd %", "cbd"],
+  cbda: ["cbda (% w/w)", "sc- cbda (% w/w)", "cbda %", "cbda"],
+  cbg: ["cbg (% w/w)", "sc - cbg (% w/w)", "cbg %", "cbg"],
+  cbga: ["cbga (% w/w)", "sc- cbga (% w/w)", "cbga %", "cbga"],
+  cbn: ["cbn (% w/w)", "sc- cbn (% w/w)", "cbn %", "cbn"],
+  thcv: ["thcv (% w/w)", "sc- thcv (% w/w)", "thcv %", "thcv"],
+  cbc: ["cbc (% w/w)", "sc- cbc (% w/w)", "cbc %", "cbc"],
+  cbdv: ["cbdv (% w/w)", "sc- cbdv (% w/w)", "cbdv %", "cbdv"],
+  cbl: ["cbl (% w/w)", "sc- cbl (% w/w)", "cbl %", "cbl"],
+
+  // Terpenes — plain names (our template + CCA format)
+  totalTerpenes: [
+    "total terpene (% w/w)", "total terpenes %", "total terpenes",
+    "total terpenes (% w/w)", "terpenoids total",
+  ],
+  limonene: ["limonene", "limonene %", "d-limonene %", "d-limonene"],
+  myrcene: ["myrcene", "myrcene %", "beta-myrcene %", "b-myrcene %"],
+  caryophyllene: [
+    "beta caryophyllene", "beta-caryophyllene",
+    "caryophyllene %", "b-caryophyllene %",
+  ],
+  humulene: ["alpha humulene", "alpha-humulene", "humulene %", "a-humulene %"],
+  linalool: ["linalool", "linalool %"],
+  "alpha-pinene": ["alpha pinene", "alpha-pinene", "a-pinene %"],
+  "beta-pinene": ["beta pinene", "beta-pinene", "b-pinene %"],
+  terpinolene: ["terpinolene", "terpinolene %"],
+  ocimene: ["ocimene", "ocimene %", "b-ocimene %"],
+  bisabolol: ["alpha bisabolol", "bisabolol", "a-bisabolol %"],
+  fenchol: ["fenchol", "fenchol %"],
+  nerolidol: ["nerolidol", "nerolidol %", "trans-nerolidol %"],
+  guaiol: ["guaiol", "guaiol %"],
+  camphene: ["camphene", "camphene %"],
+  valencene: ["valencene", "valencene %"],
+  geraniol: ["geraniol", "geraniol %"],
+  borneol: ["borneol", "borneol %"],
+  eucalyptol: ["eucalyptol", "eucalyptol %"],
+  sabinene: ["sabinene", "sabinene %"],
+  terpineol: ["terpineol", "terpineol %"],
+  "caryophyllene-oxide": ["caryophyllene oxide", "caryophyllene oxide %"],
 };
 
 function parseValue(val: string): number {
@@ -196,7 +222,7 @@ export function parseCSV(csvContent: string): ParsedLabResult[] {
 
     // Build cannabinoids object
     const cannabinoids: Record<string, number> = {};
-    for (const name of ["thc", "thca", "cbd", "cbda", "cbg", "cbga", "cbn", "thcv", "cbc"]) {
+    for (const name of ["thc", "d8thc", "thca", "cbd", "cbda", "cbg", "cbga", "cbn", "thcv", "cbc", "cbdv", "cbl"]) {
       const v = getNum(name);
       if (v > 0) cannabinoids[name] = v;
     }
@@ -206,7 +232,8 @@ export function parseCSV(csvContent: string): ParsedLabResult[] {
     for (const name of [
       "limonene", "myrcene", "caryophyllene", "humulene", "linalool",
       "alpha-pinene", "beta-pinene", "terpinolene", "ocimene", "bisabolol",
-      "fenchol", "nerolidol", "guaiol", "camphene",
+      "fenchol", "nerolidol", "guaiol", "camphene", "valencene", "geraniol",
+      "borneol", "eucalyptol", "sabinene", "terpineol", "caryophyllene-oxide",
     ]) {
       const v = getNum(name);
       if (v > 0) terpenes[name] = v;
