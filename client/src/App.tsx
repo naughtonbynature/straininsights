@@ -11,6 +11,7 @@ import ConfirmPage from "@/pages/Confirm";
 import ResultsPage from "@/pages/Results";
 import DetailPage from "@/pages/Detail";
 import { Component, type ReactNode, type ErrorInfo } from "react";
+import { BrandBar } from "@/components/BrandBar";
 
 // ── Error Boundary ────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <SDKProvider>
+          <BrandBar />
           <ErrorBoundary>
             <Router hook={useHashLocation}>
               <AppRouter />
