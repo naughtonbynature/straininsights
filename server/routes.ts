@@ -64,34 +64,6 @@ function getUserId(req: Request): string {
   );
 }
 
-async function callLLM(prompt: string): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    return "LLM API key not configured. Please set OPENROUTER_API_KEY environment variable.";
-  }
-
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "anthropic/claude-3.5-haiku",
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 600,
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`LLM API error: ${err}`);
-  }
-
-  const data = (await response.json()) as any;
-  return data.choices?.[0]?.message?.content || "";
-}
-
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   ensureSchema();
 
@@ -246,8 +218,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // Generate descriptions via LLM
-  app.post("/api/results/:id/generate", async (req, res) => {
+  // Return the 3 LLM prompts for frontend to call sdk.callLLM() — no direct LLM call here
+  app.post("/api/results/:id/generate-prompts", async (req, res) => {
     try {
       const result = await storage.getLabResult(req.params.id);
       if (!result) return res.status(404).json({ message: "Not found" });
@@ -257,8 +229,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const profileInterpretation = interpretProfile(cannabinoids, terpenes);
       const knowledgeBase = buildKnowledgeBaseText();
 
-      const productPrompt = `${knowledgeBase}
+      // Optional brand voice from request body (injected by frontend if brand guide available)
+      const brandVoice: string = req.body?.brandVoice || "";
+      const brandVoiceNote = brandVoice
+        ? `\nBrand Voice: ${brandVoice}\n`
+        : "";
 
+      const productPrompt = `${knowledgeBase}
+${brandVoiceNote}
 LAB DATA:
 Product: ${result.productName}
 Strain: ${result.strainName || "Unknown"}
@@ -275,7 +253,7 @@ Standout Cannabinoids: ${profileInterpretation.standoutCannabinoids.join(", ") |
 Write a compelling product description for ${result.productName}. Include specific cannabinoid and terpene percentages. Mention the dominant terpene's aroma and taste. Reference any standout minor cannabinoids. Keep it under 150 words. Use confident, knowledgeable brand voice. No preamble — just the description.`;
 
       const strainPrompt = `${knowledgeBase}
-
+${brandVoiceNote}
 STRAIN DATA:
 Strain: ${result.strainName || result.productName}
 Terpenes: ${JSON.stringify(terpenes, null, 2)}
@@ -288,7 +266,7 @@ Experience Type: ${profileInterpretation.experienceType}
 Write a strain description for ${result.strainName || result.productName} that focuses on the GENERAL character of this strain — what it tends to be like, not specific product numbers. Describe likely aromas, flavors, and effects based on the terpene profile. Use 'tends to' and 'may' language. Keep it under 120 words. No preamble — just the description.`;
 
       const insightPrompt = `You are a cannabis terpene and cannabinoid expert.
-
+${brandVoiceNote}
 LAB DATA:
 Product: ${result.productName}
 Strain: ${result.strainName || "Unknown"}
@@ -305,22 +283,10 @@ Standout Cannabinoids: ${profileInterpretation.standoutCannabinoids.join(", ") |
 
 Write a 2-3 sentence scientific-yet-accessible insight about this product's terpene and cannabinoid interaction. Mention the entourage effect if minor cannabinoids are present. Reference specific percentages. No preamble — just the insight.`;
 
-      const [productDescription, strainDescription, terpeneInsight] = await Promise.all([
-        callLLM(productPrompt),
-        callLLM(strainPrompt),
-        callLLM(insightPrompt),
-      ]);
-
-      const updated = await storage.updateLabResult(req.params.id, {
-        productDescription,
-        strainDescription,
-        terpeneInsight,
-      });
-
-      res.json({ productDescription, strainDescription, terpeneInsight, result: updated });
+      res.json({ productPrompt, strainPrompt, insightPrompt });
     } catch (err: any) {
-      console.error("Generate error:", err);
-      res.status(500).json({ message: err.message || "Generation failed" });
+      console.error("Generate-prompts error:", err);
+      res.status(500).json({ message: err.message || "Failed to build prompts" });
     }
   });
 

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { FlaskConical, Upload as UploadIcon, FileSpreadsheet, Loader2, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest, API_BASE } from "@/lib/queryClient";
+import { useSDK } from "@/lib/sdk-context";
 
 export default function UploadPage() {
   const [, navigate] = useLocation();
@@ -11,6 +12,7 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const { sdk } = useSDK();
 
   const handleFile = useCallback(async (file: File) => {
     setError("");
@@ -26,7 +28,7 @@ export default function UploadPage() {
 
       const { results: parsed, sourceType, sourceFilename } = parseData;
 
-      // Step 2: Save all results
+      // Step 2: Save all results to tool's SQLite
       const saveRes = await fetch(`${API_BASE}/api/results`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -35,7 +37,24 @@ export default function UploadPage() {
       const saveData = await saveRes.json();
       if (!saveRes.ok) { setError(saveData.message || "Save failed"); setUploading(false); return; }
 
-      const saved = saveData.results;
+      const saved = saveData.results as Array<{ id: string }>;
+
+      // Step 3: Create a project in the SDK so it appears in the Heady OS dashboard
+      if (sdk) {
+        try {
+          const projectName = sourceFilename || file.name;
+          const project = await sdk.createProject(projectName, "straininsights");
+          if (project?.id) {
+            await sdk.saveProject(project.id, {
+              resultIds: saved.map((r) => r.id),
+              sourceFilename: projectName,
+            });
+          }
+        } catch (e) {
+          // Non-fatal: local results are saved; SDK project creation is best-effort
+          console.warn("SDK project creation failed:", e);
+        }
+      }
 
       if (saved.length === 1) {
         navigate(`/confirm/${saved[0].id}`);
@@ -46,7 +65,7 @@ export default function UploadPage() {
       setError(e.message || "Upload failed");
     }
     setUploading(false);
-  }, [navigate]);
+  }, [navigate, sdk]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setDragging(false);

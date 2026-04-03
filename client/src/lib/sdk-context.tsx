@@ -1,47 +1,53 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from "react";
 
-interface SDKContextValue {
-  sdk: any | null;
-  ready: boolean;
-  brandGuide: any | null;
-  isStandalone: boolean;
+interface HeadyContext {
+  userId: string;
+  teamId: string;
+  toolSlug?: string;
+  hasOwnKeys?: boolean;
 }
 
-const SDKCtx = createContext<SDKContextValue>({ sdk: null, ready: false, brandGuide: null, isStandalone: true });
+interface SDKState {
+  sdk: any | null;
+  context: HeadyContext | null;
+  brandGuide: any | null;
+  ready: boolean;
+}
 
-let sdkRef: any = null;
+const SDKContext = createContext<SDKState>({
+  sdk: null, context: null, brandGuide: null, ready: false,
+});
 
 export function SDKProvider({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(false);
-  const [brandGuide, setBrandGuide] = useState<any>(null);
-  const [isStandalone, setIsStandalone] = useState(true);
+  const [state, setState] = useState<SDKState>({
+    sdk: null, context: null, brandGuide: null, ready: false,
+  });
+  const initRef = useRef(false);
 
   useEffect(() => {
-    const W = window as any;
-    if (!W.HeadySDK) {
-      setTimeout(() => setReady(true), 3000);
-      return;
-    }
-    const sdk = new W.HeadySDK();
-    sdkRef = sdk;
-    const timer = setTimeout(() => { setReady(true); setIsStandalone(true); }, 3000);
+    if (initRef.current) return;
+    initRef.current = true;
 
-    sdk.on("ready", async () => {
-      clearTimeout(timer);
-      setReady(true);
-      setIsStandalone(false);
-      try {
-        const guide = await sdk.getBrandGuide();
-        setBrandGuide(guide);
-      } catch {}
-    });
+    function tryInit() {
+      const W = window as any;
+      if (!W.HeadySDK) { setTimeout(tryInit, 100); return; }
+
+      const sdk = new W.HeadySDK();
+      sdk.on("ready", async (ctx: HeadyContext) => {
+        let brandGuide = null;
+        try { brandGuide = await sdk.getBrandGuide(); } catch {}
+        setState({ sdk, context: ctx, brandGuide, ready: true });
+      });
+
+      // Standalone fallback (not in iframe) — ready after 2s with no context
+      setTimeout(() => {
+        setState((prev) => prev.ready ? prev : { sdk, context: null, brandGuide: null, ready: true });
+      }, 2000);
+    }
+    tryInit();
   }, []);
 
-  return (
-    <SDKCtx.Provider value={{ sdk: sdkRef, ready, brandGuide, isStandalone }}>
-      {children}
-    </SDKCtx.Provider>
-  );
+  return <SDKContext.Provider value={state}>{children}</SDKContext.Provider>;
 }
 
-export const useSDK = () => useContext(SDKCtx);
+export function useSDK() { return useContext(SDKContext); }

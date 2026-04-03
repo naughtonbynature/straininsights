@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Copy, RefreshCw, Globe, Mail, Video, Loader2, Check, FlaskConical } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useSDK } from "@/lib/sdk-context";
 import type { LabResult } from "@shared/schema";
 
 function Bar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
@@ -27,7 +28,9 @@ export default function DetailPage() {
   const [, params] = useRoute("/detail/:id");
   const id = params?.id || "";
   const { toast } = useToast();
+  const { sdk, brandGuide } = useSDK();
   const [regenerating, setRegenerating] = useState("");
+  const [handoffPending, setHandoffPending] = useState("");
 
   const { data: result, isLoading } = useQuery<LabResult>({
     queryKey: ["/api/results", id],
@@ -35,23 +38,50 @@ export default function DetailPage() {
     enabled: !!id,
   });
 
-  const handoffMutation = useMutation({
-    mutationFn: async (type: string) => {
-      const r = await apiRequest("POST", `/api/results/${id}/handoff/${type}`);
-      return r.json();
-    },
-    onSuccess: (_, type) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/results", id] });
-      toast({ title: `Draft: ${type.toUpperCase()} sent`, description: "Content request queued for Neural" });
-    },
-  });
+  const callSdkLLM = async (prompt: string): Promise<string> => {
+    if (sdk) {
+      try {
+        const res = await sdk.callLLM({
+          model: "anthropic/claude-sonnet-4",
+          messages: [{ role: "user", content: prompt }],
+          maxTokens: 600,
+        });
+        return res?.content || res?.choices?.[0]?.message?.content || "";
+      } catch (e) {
+        console.error("sdk.callLLM error:", e);
+        return "";
+      }
+    }
+    return "";
+  };
 
   const handleRegenerate = async () => {
     setRegenerating("all");
     try {
-      await apiRequest("POST", `/api/results/${id}/generate`);
+      const brandVoice = brandGuide?.voicePillars
+        ? (Array.isArray(brandGuide.voicePillars)
+            ? brandGuide.voicePillars.join(", ")
+            : String(brandGuide.voicePillars))
+        : "";
+
+      const promptsRes = await apiRequest("POST", `/api/results/${id}/generate-prompts`, { brandVoice });
+      const { productPrompt, strainPrompt, insightPrompt } = await promptsRes.json();
+
+      const [productDescription, strainDescription, terpeneInsight] = await Promise.all([
+        callSdkLLM(productPrompt),
+        callSdkLLM(strainPrompt),
+        callSdkLLM(insightPrompt),
+      ]);
+
+      await apiRequest("PATCH", `/api/results/${id}`, {
+        productDescription,
+        strainDescription,
+        terpeneInsight,
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/results", id] });
-    } catch {}
+    } catch (e) {
+      console.error("Regenerate error:", e);
+    }
     setRegenerating("");
   };
 
@@ -63,6 +93,58 @@ export default function DetailPage() {
   const handleSave = async (field: string, value: string) => {
     await apiRequest("PATCH", `/api/results/${id}`, { [field]: value });
     queryClient.invalidateQueries({ queryKey: ["/api/results", id] });
+  };
+
+  const handleHandoff = async (type: "web" | "crm" | "ugc") => {
+    if (!result) return;
+    setHandoffPending(type);
+    try {
+      const targetBotName =
+        type === "web" ? "Web Copywriter"
+        : type === "crm" ? "Email & SMS Copywriter"
+        : "UGC Script Writer";
+
+      const terpenes = JSON.parse(result.terpenes || "{}");
+      const cannabinoids = JSON.parse(result.cannabinoids || "{}");
+
+      const content = JSON.stringify({
+        productName: result.productName,
+        strainName: result.strainName,
+        productType: result.productType,
+        brandName: result.brandName,
+        productDescription: result.productDescription,
+        strainDescription: result.strainDescription,
+        terpeneInsight: result.terpeneInsight,
+        terpeneProfile: terpenes,
+        cannabinoidProfile: cannabinoids,
+        totalThc: result.totalThc,
+        totalCbd: result.totalCbd,
+        dominantTerpene: result.dominantTerpene,
+      });
+
+      if (sdk) {
+        await sdk.handoff({
+          targetToolSlug: "neural",
+          targetBotName,
+          content,
+          contentType: "product-spotlight",
+        });
+      }
+
+      // Update workflow status in backend
+      const statusField =
+        type === "web" ? "webDraftStatus"
+        : type === "crm" ? "crmDraftStatus"
+        : "ugcDraftStatus";
+      await apiRequest("PATCH", `/api/results/${id}`, { [statusField]: "sent" });
+      queryClient.invalidateQueries({ queryKey: ["/api/results", id] });
+
+      toast({ title: `Draft: ${type.toUpperCase()} sent`, description: "Content request queued for Neural" });
+    } catch (e: any) {
+      console.error("Handoff error:", e);
+      toast({ title: "Handoff failed", description: e?.message || "Could not send to Neural" });
+    }
+    setHandoffPending("");
   };
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" style={{ color: "#C8FF00" }} /></div>;
@@ -84,9 +166,9 @@ export default function DetailPage() {
   const maxCann = Math.max(...cannEntries.map(c => c.value), 1);
 
   const workflows = [
-    { type: "web", label: "Draft: WEB", desc: "Send to Web Copywriter for a Product Spotlight blog post", icon: Globe, color: "#C8FF00", status: result.webDraftStatus },
-    { type: "crm", label: "Draft: CRM", desc: "Send to Email & SMS Copywriter for a campaign", icon: Mail, color: "#CA6641", status: result.crmDraftStatus },
-    { type: "ugc", label: "Draft: UGC", desc: "Send to UGC Script Writer for social content", icon: Video, color: "#F5F5F5", status: result.ugcDraftStatus },
+    { type: "web" as const, label: "Draft: WEB", desc: "Send to Web Copywriter for a Product Spotlight blog post", icon: Globe, color: "#C8FF00", status: result.webDraftStatus },
+    { type: "crm" as const, label: "Draft: CRM", desc: "Send to Email & SMS Copywriter for a campaign", icon: Mail, color: "#CA6641", status: result.crmDraftStatus },
+    { type: "ugc" as const, label: "Draft: UGC", desc: "Send to UGC Script Writer for social content", icon: Video, color: "#F5F5F5", status: result.ugcDraftStatus },
   ];
 
   return (
@@ -104,6 +186,9 @@ export default function DetailPage() {
             {result.testDate && <span>• Tested {result.testDate}</span>}
             {result.labName && <span>• {result.labName}</span>}
           </div>
+          {brandGuide && (
+            <p className="text-xs mt-2" style={{ color: "#C8FF00" }}>Brand voice active from your brand guide</p>
+          )}
         </div>
 
         <div className="grid md:grid-cols-2 gap-4 mb-6">
@@ -162,8 +247,12 @@ export default function DetailPage() {
         <div className="space-y-3 mt-8">
           <h3 className="text-sm font-medium" style={{ color: "#999" }}>Send to Neural</h3>
           {workflows.map(wf => (
-            <Card key={wf.type} className="cursor-pointer hover:opacity-90 transition-opacity" style={{ background: "#1A1A1B", borderColor: wf.color, borderWidth: "1px" }}
-              onClick={() => wf.status !== "sent" && handoffMutation.mutate(wf.type)}>
+            <Card
+              key={wf.type}
+              className="cursor-pointer hover:opacity-90 transition-opacity"
+              style={{ background: "#1A1A1B", borderColor: wf.color, borderWidth: "1px" }}
+              onClick={() => wf.status !== "sent" && handoffPending === "" && handleHandoff(wf.type)}
+            >
               <CardContent className="py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <wf.icon className="w-4 h-4" style={{ color: wf.color }} />
@@ -174,7 +263,7 @@ export default function DetailPage() {
                 </div>
                 {wf.status === "sent" ? (
                   <div className="flex items-center gap-1 text-xs" style={{ color: "#22C55E" }}><Check className="w-3 h-3" /> Sent</div>
-                ) : handoffMutation.isPending ? (
+                ) : handoffPending === wf.type ? (
                   <Loader2 className="w-4 h-4 animate-spin" style={{ color: wf.color }} />
                 ) : (
                   <span className="text-xs" style={{ color: wf.color }}>Send →</span>

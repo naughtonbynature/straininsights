@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useSDK } from "@/lib/sdk-context";
 import type { LabResult } from "@shared/schema";
 
 function TerpeneBar({ name, value, max }: { name: string; value: number; max: number }) {
@@ -40,6 +41,7 @@ export default function ConfirmPage() {
   const [, navigate] = useLocation();
   const [, params] = useRoute("/confirm/:id");
   const id = params?.id || "";
+  const { sdk, brandGuide } = useSDK();
 
   const { data: result, isLoading } = useQuery<LabResult>({
     queryKey: ["/api/results", id],
@@ -65,9 +67,48 @@ export default function ConfirmPage() {
     mutationFn: async () => {
       // First update the result with any edits
       await apiRequest("PATCH", `/api/results/${id}`, { productName, strainName, productType, brandName });
-      // Then generate descriptions
-      const res = await apiRequest("POST", `/api/results/${id}/generate`);
-      return res.json();
+
+      // Extract brand voice from brand guide if available
+      const brandVoice = brandGuide?.voicePillars
+        ? (Array.isArray(brandGuide.voicePillars)
+            ? brandGuide.voicePillars.join(", ")
+            : String(brandGuide.voicePillars))
+        : "";
+
+      // Get the 3 prompts from backend (no LLM call there)
+      const promptsRes = await apiRequest("POST", `/api/results/${id}/generate-prompts`, { brandVoice });
+      const { productPrompt, strainPrompt, insightPrompt } = await promptsRes.json();
+
+      // Call LLM via SDK (credit-tracked through parent)
+      const callSdkLLM = async (prompt: string): Promise<string> => {
+        if (sdk) {
+          try {
+            const res = await sdk.callLLM({
+              model: "anthropic/claude-sonnet-4",
+              messages: [{ role: "user", content: prompt }],
+              maxTokens: 600,
+            });
+            return res?.content || res?.choices?.[0]?.message?.content || "";
+          } catch (e) {
+            console.error("sdk.callLLM error:", e);
+            return "";
+          }
+        }
+        return "";
+      };
+
+      const [productDescription, strainDescription, terpeneInsight] = await Promise.all([
+        callSdkLLM(productPrompt),
+        callSdkLLM(strainPrompt),
+        callSdkLLM(insightPrompt),
+      ]);
+
+      // Save generated text back to the result
+      await apiRequest("PATCH", `/api/results/${id}`, {
+        productDescription,
+        strainDescription,
+        terpeneInsight,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/results", id] });
@@ -104,6 +145,12 @@ export default function ConfirmPage() {
 
         <h1 className="text-xl font-bold mb-1" style={{ color: "#F5F5F5" }}>Confirm Lab Results</h1>
         <p className="text-sm mb-6" style={{ color: "#999" }}>Verify the parsed data before generating content</p>
+
+        {brandGuide && (
+          <div className="mb-4 text-xs px-3 py-2 rounded" style={{ background: "#1A1A1B", color: "#C8FF00", border: "1px solid #2A2A2A" }}>
+            Brand voice loaded from your brand guide
+          </div>
+        )}
 
         <div className="grid md:grid-cols-2 gap-4 mb-6">
           <Card style={{ background: "#1A1A1B", borderColor: "#2A2A2A" }}>
