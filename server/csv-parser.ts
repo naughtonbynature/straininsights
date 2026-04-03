@@ -65,7 +65,7 @@ function parseValue(val: string): number {
 }
 
 function normalizeColumnName(col: string): string {
-  return col.toLowerCase().trim().replace(/\s+/g, " ");
+  return col.toLowerCase().replace(/[\r\n]+/g, " ").trim().replace(/\s+/g, " ");
 }
 
 function findColumn(headers: string[], keys: string[]): number {
@@ -86,6 +86,9 @@ function findColumn(headers: string[], keys: string[]): number {
   return -1;
 }
 
+/**
+ * Split a single CSV row (already extracted) into cell values.
+ */
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
   let current = "";
@@ -105,13 +108,40 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
+/**
+ * Split raw CSV text into logical rows, respecting quoted fields
+ * that may contain newlines.
+ */
+function splitCSVRows(content: string): string[] {
+  const rows: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      current += char;
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      // End of a logical row
+      if (char === "\r" && content[i + 1] === "\n") i++; // skip \r\n
+      const trimmed = current.trim();
+      if (trimmed) rows.push(trimmed);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  const trimmed = current.trim();
+  if (trimmed) rows.push(trimmed);
+
+  return rows;
+}
+
 export const MAX_CSV_ROWS = 50;
 
 export function parseCSV(csvContent: string): ParsedLabResult[] {
-  const lines = csvContent
-    .split("\n")
-    .map((l) => l.replace(/\r/g, "").trim())
-    .filter(Boolean);
+  const lines = splitCSVRows(csvContent);
 
   if (lines.length < 2) return [];
 
@@ -121,9 +151,6 @@ export function parseCSV(csvContent: string): ParsedLabResult[] {
     throw new Error(`CSV contains ${dataRowCount} rows. Maximum is ${MAX_CSV_ROWS} per upload.`);
   }
 
-  // Find header row (first non-empty row)
-  // Handle multi-line headers by merging consecutive header lines before data
-  let headerLine = 0;
   const headers = parseCSVLine(lines[0]);
 
   // Build column index map
@@ -156,7 +183,7 @@ export function parseCSV(csvContent: string): ParsedLabResult[] {
 
   const results: ParsedLabResult[] = [];
 
-  for (let i = headerLine + 1; i < lines.length; i++) {
+  for (let i = 1; i < lines.length; i++) {
     const cells = parseCSVLine(lines[i]);
     if (cells.every((c) => !c)) continue;
 
