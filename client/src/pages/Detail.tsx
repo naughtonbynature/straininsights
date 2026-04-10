@@ -42,7 +42,7 @@ export default function DetailPage() {
     if (sdk) {
       try {
         const res = await sdk.callLLM({
-          model: "anthropic/claude-sonnet-4",
+          model: "premium",
           messages: [{ role: "user", content: prompt }],
           maxTokens: 600,
         });
