@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { FlaskConical, Upload as UploadIcon, FileSpreadsheet, Loader2, Info } from "lucide-react";
@@ -12,7 +12,28 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-  const { sdk } = useSDK();
+  const { sdk, context } = useSDK();
+
+  // Resume from a pending project
+  useEffect(() => {
+    const pendingId = (context as any)?.pendingProjectId;
+    if (!pendingId || !sdk) return;
+    (async () => {
+      try {
+        const data = await sdk.loadProject(pendingId);
+        if (data?.resultIds?.length) {
+          // Navigate to results page with the saved result IDs
+          if (data.resultIds.length === 1) {
+            navigate(`/confirm/${data.resultIds[0]}`);
+          } else {
+            navigate("/results");
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to resume StrainInsights project:", e);
+      }
+    })();
+  }, [sdk, context, navigate]);
 
   const handleFile = useCallback(async (file: File) => {
     setError("");
