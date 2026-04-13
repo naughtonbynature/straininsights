@@ -33,6 +33,7 @@ export function SDKProvider({ children }: { children: ReactNode }) {
       if (!W.HeadySDK) { setTimeout(tryInit, 100); return; }
 
       const sdk = new W.HeadySDK();
+      W._headySDKInstance = sdk;
       sdk.on("ready", async (ctx: HeadyContext) => {
         let brandGuide = null;
         try { brandGuide = await sdk.getBrandGuide(); } catch {}

@@ -175,6 +175,218 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── POS lab data: top products with lab results from Dutchie sync ──────────
+  app.get("/api/pos-products", async (req, res) => {
+    try {
+      const instanceId = req.headers["x-heady-team-id"] as string;
+      if (!instanceId) return res.json({ available: false, products: [] });
+
+      const { supabase } = await import("./supabase");
+
+      // Get products that have lab results, joined with sales data
+      const { data: labProducts } = await supabase
+        .from("pos_lab_results")
+        .select("product_id, lab_test, value, unit, strain, strain_type, batch_name")
+        .eq("instance_id", instanceId)
+        .limit(10000);
+
+      if (!labProducts || labProducts.length === 0) {
+        return res.json({ available: false, products: [] });
+      }
+
+      // Group lab results by product_id
+      const labsByProduct = new Map<number, any[]>();
+      for (const lr of labProducts) {
+        if (!labsByProduct.has(lr.product_id)) labsByProduct.set(lr.product_id, []);
+        labsByProduct.get(lr.product_id)!.push(lr);
+      }
+
+      // Get product names + sales data for these product IDs
+      const productIds = Array.from(labsByProduct.keys());
+      const { data: products } = await supabase
+        .from("pos_products")
+        .select("product_id, product_name, brand_name, category, strain, strain_type")
+        .eq("instance_id", instanceId)
+        .in("product_id", productIds);
+
+      // Get revenue for these products (last 90 days)
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: salesData } = await supabase.rpc("pos_top_products", {
+        p_instance_id: instanceId,
+        p_from: ninetyDaysAgo.slice(0, 10),
+        p_to: new Date().toISOString().slice(0, 10),
+        p_limit: 50000,
+      });
+      const salesByProductId = new Map<number, any>();
+      if (salesData) {
+        for (const s of salesData) {
+          if (s.product_id) salesByProductId.set(s.product_id, s);
+        }
+      }
+
+      // Build the product list with lab data + sales
+      const result = (products || []).map((p: any) => {
+        const labs = labsByProduct.get(p.product_id) || [];
+        const sales = salesByProductId.get(p.product_id);
+        // Split into cannabinoids + terpenes
+        const cannabinoids: Record<string, number> = {};
+        const terpenes: Record<string, number> = {};
+        let totalThc = 0, totalCbd = 0;
+        for (const lr of labs) {
+          const test = lr.lab_test?.toLowerCase() || "";
+          if (/thc|cbd|cbg|cbn|cbda|thca|thcv|cbc|cbt/i.test(lr.lab_test)) {
+            cannabinoids[lr.lab_test] = lr.value;
+            if (test.includes("thc") && !test.includes("thca") && !test.includes("thcv")) totalThc = Math.max(totalThc, lr.value || 0);
+            if (test === "cbd") totalCbd = lr.value || 0;
+          } else if (lr.value > 0) {
+            terpenes[lr.lab_test] = lr.value;
+          }
+        }
+        const dominantTerpene = Object.entries(terpenes).sort(([,a],[,b]) => (b as number) - (a as number))[0]?.[0] || null;
+
+        return {
+          productId: p.product_id,
+          productName: p.product_name,
+          brandName: p.brand_name,
+          category: p.category,
+          strain: labs[0]?.strain || p.strain || null,
+          strainType: labs[0]?.strain_type || p.strain_type || null,
+          revenue: sales?.revenue || 0,
+          unitsSold: sales?.units_sold || 0,
+          cannabinoids,
+          terpenes,
+          totalThc,
+          totalCbd,
+          totalTerpenes: Object.values(terpenes).reduce((s, v) => s + (v as number), 0),
+          dominantTerpene,
+          hasLabData: true,
+        };
+      }).sort((a: any, b: any) => (b.revenue || 0) - (a.revenue || 0));
+
+      res.json({ available: true, products: result });
+    } catch (err: any) {
+      console.error("POS products error:", err);
+      res.json({ available: false, products: [], error: err.message });
+    }
+  });
+
+  // ── POS lab data: search products by name ──────────────────────────────────
+  app.get("/api/pos-products/search", async (req, res) => {
+    try {
+      const instanceId = req.headers["x-heady-team-id"] as string;
+      const query = (req.query.q as string || "").trim();
+      if (!instanceId || !query) return res.json({ products: [] });
+
+      const { supabase } = await import("./supabase");
+
+      // Search products by name (case-insensitive)
+      const { data: products } = await supabase
+        .from("pos_products")
+        .select("product_id, product_name, brand_name, category, strain, strain_type")
+        .eq("instance_id", instanceId)
+        .ilike("product_name", `%${query}%`)
+        .limit(20);
+
+      if (!products || products.length === 0) return res.json({ products: [] });
+
+      // Get lab results for matched products
+      const productIds = products.map((p: any) => p.product_id);
+      const { data: labData } = await supabase.rpc("pos_product_lab_results", {
+        p_instance_id: instanceId,
+        p_product_ids: productIds,
+      });
+
+      const labsByProduct = new Map<number, any[]>();
+      if (labData) {
+        for (const lr of labData) {
+          if (!labsByProduct.has(lr.product_id)) labsByProduct.set(lr.product_id, []);
+          labsByProduct.get(lr.product_id)!.push(lr);
+        }
+      }
+
+      const result = products.map((p: any) => {
+        const labs = labsByProduct.get(p.product_id) || [];
+        const cannabinoids: Record<string, number> = {};
+        const terpenes: Record<string, number> = {};
+        for (const lr of labs) {
+          if (/thc|cbd|cbg|cbn|cbda|thca|thcv|cbc|cbt/i.test(lr.lab_test)) {
+            cannabinoids[lr.lab_test] = lr.value;
+          } else if (lr.value > 0) {
+            terpenes[lr.lab_test] = lr.value;
+          }
+        }
+        return {
+          productId: p.product_id,
+          productName: p.product_name,
+          brandName: p.brand_name,
+          category: p.category,
+          strain: p.strain,
+          strainType: p.strain_type,
+          cannabinoids,
+          terpenes,
+          hasLabData: labs.length > 0,
+        };
+      });
+
+      res.json({ products: result });
+    } catch (err: any) {
+      res.json({ products: [] });
+    }
+  });
+
+  // ── Import a POS product directly into StrainInsights workflow ─────────────
+  app.post("/api/results/from-pos", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const instanceId = req.headers["x-heady-team-id"] as string || null;
+      const { product } = req.body; // product object from /api/pos-products
+
+      if (!product || !product.productName) {
+        return res.status(400).json({ message: "Product data required" });
+      }
+
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      const dominantTerpene = Object.entries(product.terpenes || {})
+        .sort(([,a],[,b]) => (b as number) - (a as number))[0]?.[0] || null;
+
+      const result = await storage.createLabResult({
+        id,
+        userId,
+        instanceId,
+        productName: product.productName,
+        strainName: product.strain || null,
+        productType: product.category || null,
+        brandName: product.brandName || null,
+        batchNumber: null,
+        testDate: null,
+        labName: null,
+        cannabinoids: JSON.stringify(product.cannabinoids || {}),
+        totalThc: product.totalThc || null,
+        totalCbd: product.totalCbd || null,
+        totalCannabinoids: null,
+        terpenes: JSON.stringify(product.terpenes || {}),
+        totalTerpenes: product.totalTerpenes || null,
+        dominantTerpene: dominantTerpene,
+        productDescription: null,
+        strainDescription: null,
+        webDraftStatus: "none",
+        crmDraftStatus: "none",
+        ugcDraftStatus: "none",
+        sourceType: "pos_sync",
+        sourceFilename: null,
+        rawData: JSON.stringify(product),
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      res.json({ result });
+    } catch (err: any) {
+      console.error("POS import error:", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // List all results for user
   app.get("/api/results", async (req, res) => {
     try {

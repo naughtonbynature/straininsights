@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { FlaskConical, Upload as UploadIcon, FileSpreadsheet, Loader2, Info } from "lucide-react";
+import { FlaskConical, Upload as UploadIcon, FileSpreadsheet, Loader2, Info, Search, TrendingUp, Database } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest, API_BASE } from "@/lib/queryClient";
 import { useSDK } from "@/lib/sdk-context";
@@ -13,6 +14,43 @@ export default function UploadPage() {
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const { sdk, context } = useSDK();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [importing, setImporting] = useState<string | null>(null);
+
+  // Fetch POS products with lab results
+  const { data: posData } = useQuery<{ available: boolean; products: any[] }>({
+    queryKey: ["/api/pos-products", context?.teamId || "none"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/pos-products");
+      return res.json();
+    },
+    enabled: !!context?.teamId,
+  });
+
+  // Search POS products
+  const { data: searchResults } = useQuery<{ products: any[] }>({
+    queryKey: ["/api/pos-products/search", searchQuery],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/pos-products/search?q=${encodeURIComponent(searchQuery)}`);
+      return res.json();
+    },
+    enabled: searchQuery.length >= 2 && !!context?.teamId,
+  });
+
+  // Import a POS product into StrainInsights
+  async function importPosProduct(product: any) {
+    setImporting(product.productId?.toString());
+    try {
+      const res = await apiRequest("POST", "/api/results/from-pos", { product });
+      const data = await res.json();
+      if (data.result?.id) {
+        navigate(`/confirm/${data.result.id}`);
+      }
+    } catch (e: any) {
+      setError(e.message || "Import failed");
+    }
+    setImporting(null);
+  }
 
   // Resume from a pending project
   useEffect(() => {
@@ -140,6 +178,76 @@ export default function UploadPage() {
       </div>
 
       {error && <p className="text-red-400 text-sm mt-4">{error}</p>}
+
+      {/* POS Products with Lab Results */}
+      {posData?.available && posData.products.length > 0 && (
+        <div className="w-full max-w-lg mt-8">
+          <div className="flex items-center gap-2 mb-3">
+            <Database className="w-4 h-4" style={{ color: "#C8FF00" }} />
+            <h2 className="text-sm font-medium" style={{ color: "#F5F5F5" }}>POS Products with Lab Data</h2>
+          </div>
+
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-2.5 w-3.5 h-3.5" style={{ color: "#666" }} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search products by name..."
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border"
+              style={{ background: "#1A1A1B", borderColor: "#2A2A2A", color: "#F5F5F5" }}
+              data-testid="input-pos-search"
+            />
+          </div>
+
+          {/* Search results or top sellers */}
+          <div className="space-y-1.5 max-h-64 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+            {(searchQuery.length >= 2 ? searchResults?.products || [] : posData.products.slice(0, 10)).map((p: any) => (
+              <button
+                key={p.productId}
+                onClick={() => importPosProduct(p)}
+                disabled={importing === p.productId?.toString()}
+                className="w-full text-left px-3 py-2 rounded-lg border flex items-center gap-3 transition-colors hover:border-[#C8FF00]/50"
+                style={{ background: "#1A1A1B", borderColor: "#2A2A2A" }}
+                data-testid={`pos-product-${p.productId}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: "#F5F5F5" }}>{p.productName}</p>
+                  <p className="text-xs truncate" style={{ color: "#888" }}>
+                    {p.brandName}{p.strain ? ` · ${p.strain}` : ""}{p.strainType ? ` (${p.strainType})` : ""}
+                  </p>
+                </div>
+                {p.hasLabData && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#C8FF00/15", color: "#C8FF00", border: "1px solid #C8FF0033" }}>
+                    Lab
+                  </span>
+                )}
+                {p.revenue > 0 && (
+                  <span className="text-xs" style={{ color: "#888" }}>
+                    ${Math.round(p.revenue).toLocaleString()}
+                  </span>
+                )}
+                {importing === p.productId?.toString() ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "#C8FF00" }} />
+                ) : (
+                  <TrendingUp className="w-3.5 h-3.5" style={{ color: "#666" }} />
+                )}
+              </button>
+            ))}
+          </div>
+
+          {!searchQuery && posData.products.length > 10 && (
+            <p className="text-xs mt-2 text-center" style={{ color: "#666" }}>
+              Showing top 10 by revenue · {posData.products.length} products with lab data
+            </p>
+          )}
+
+          <div className="border-t mt-6 pt-4" style={{ borderColor: "#2A2A2A" }}>
+            <p className="text-xs text-center mb-3" style={{ color: "#666" }}>or upload a COA manually</p>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-4 mt-6">
         <Button variant="outline" size="sm" className="text-xs" onClick={async () => {

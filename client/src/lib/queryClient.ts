@@ -9,14 +9,30 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+function getSDKHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  try {
+    const sdk = (window as any)._headySDKInstance;
+    if (sdk) {
+      const ctx = sdk.getContext();
+      if (ctx?.userId) headers["x-heady-user-id"] = ctx.userId;
+      if (ctx?.teamId) headers["x-heady-team-id"] = ctx.teamId;
+    }
+  } catch {}
+  return headers;
+}
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const headers: Record<string, string> = { ...getSDKHeaders() };
+  if (data) headers["Content-Type"] = "application/json";
+
   const res = await fetch(`${API_BASE}${url}`, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
   });
 
@@ -30,7 +46,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(`${API_BASE}${queryKey.join("/")}`);
+    const res = await fetch(`${API_BASE}${queryKey[0]}`, { headers: getSDKHeaders() });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;
