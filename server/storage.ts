@@ -1,12 +1,17 @@
-import { type User, type InsertUser, users, labResults, type LabResult, type InsertLabResult } from "@shared/schema";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq, desc } from "drizzle-orm";
+import { type User, type InsertUser, type LabResult, type InsertLabResult } from "@shared/schema";
+import { supabase } from "./supabase";
 
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
-
-export const db = drizzle(sqlite);
+// ── camelCase ↔ snake_case helpers ──────────────────────────
+function toSnake(obj: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) out[k.replace(/([A-Z])/g, "_$1").toLowerCase()] = v;
+  return out;
+}
+function toCamel(obj: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) out[k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] = v;
+  return out;
+}
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -21,52 +26,69 @@ export interface IStorage {
   deleteLabResult(id: string): Promise<void>;
 }
 
-export class DatabaseStorage implements IStorage {
+export class SupabaseStorage implements IStorage {
+  // ── Users (not actively used) ──────────────────────────────
   async getUser(id: number): Promise<User | undefined> {
-    return db.select().from(users).where(eq(users.id, id)).get();
+    return undefined;
   }
-
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return db.select().from(users).where(eq(users.username, username)).get();
+    return undefined;
+  }
+  async createUser(user: InsertUser): Promise<User> {
+    throw new Error("User creation not supported");
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    return db.insert(users).values(insertUser).returning().get();
-  }
-
+  // ── Lab Results ────────────────────────────────────────────
   async createLabResult(result: InsertLabResult): Promise<LabResult> {
-    return db.insert(labResults).values(result).returning().get();
+    const row = toSnake(result as Record<string, any>);
+    const { data, error } = await supabase
+      .from("straininsights_results")
+      .insert(row)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return toCamel(data) as LabResult;
   }
 
   async getLabResult(id: string): Promise<LabResult | undefined> {
-    return db.select().from(labResults).where(eq(labResults.id, id)).get();
+    const { data, error } = await supabase
+      .from("straininsights_results")
+      .select()
+      .eq("id", id)
+      .single();
+    if (error || !data) return undefined;
+    return toCamel(data) as LabResult;
   }
 
   async getLabResultsByUser(userId: string): Promise<LabResult[]> {
-    return db
+    const { data, error } = await supabase
+      .from("straininsights_results")
       .select()
-      .from(labResults)
-      .where(eq(labResults.userId, userId))
-      .orderBy(desc(labResults.createdAt))
-      .all();
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data || []).map((row) => toCamel(row) as LabResult);
   }
 
-  async updateLabResult(
-    id: string,
-    updates: Partial<InsertLabResult>
-  ): Promise<LabResult | undefined> {
-    const result = await db
-      .update(labResults)
-      .set({ ...updates, updatedAt: new Date().toISOString() })
-      .where(eq(labResults.id, id))
-      .returning()
-      .get();
-    return result;
+  async updateLabResult(id: string, updates: Partial<InsertLabResult>): Promise<LabResult | undefined> {
+    const row = toSnake({ ...updates, updatedAt: new Date().toISOString() } as Record<string, any>);
+    const { data, error } = await supabase
+      .from("straininsights_results")
+      .update(row)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) return undefined;
+    return toCamel(data) as LabResult;
   }
 
   async deleteLabResult(id: string): Promise<void> {
-    await db.delete(labResults).where(eq(labResults.id, id)).run();
+    const { error } = await supabase
+      .from("straininsights_results")
+      .delete()
+      .eq("id", id);
+    if (error) throw new Error(error.message);
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new SupabaseStorage();

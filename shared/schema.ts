@@ -1,65 +1,57 @@
-import { sqliteTable, text, real, integer } from "drizzle-orm/sqlite-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-});
+// ── User ────────────────────────────────────────────────────
+export interface User {
+  id: number;
+  username: string;
+  password: string;
+}
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
+export type InsertUser = { username: string; password: string };
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
-
-export const labResults = sqliteTable("lab_results", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  instanceId: text("instance_id"),
+// ── Lab Results ─────────────────────────────────────────────
+export interface LabResult {
+  id: string;
+  userId: string;
+  instanceId: string | null;
 
   // Product info
-  productName: text("product_name").notNull(),
-  strainName: text("strain_name"),
-  productType: text("product_type"), // flower, vape, concentrate, edible, pre-roll, topical
-  brandName: text("brand_name"),
-  batchNumber: text("batch_number"),
-  testDate: text("test_date"),
-  labName: text("lab_name"),
+  productName: string;
+  strainName: string | null;
+  productType: string | null;
+  brandName: string | null;
+  batchNumber: string | null;
+  testDate: string | null;
+  labName: string | null;
 
   // Cannabinoid data (stored as JSON)
-  cannabinoids: text("cannabinoids"), // JSON: { thc: 80.1, cbd: 0.185, cbg: 2.24, ... }
-  totalThc: real("total_thc"),
-  totalCbd: real("total_cbd"),
-  totalCannabinoids: real("total_cannabinoids"),
+  cannabinoids: string | null;
+  totalThc: number | null;
+  totalCbd: number | null;
+  totalCannabinoids: number | null;
 
   // Terpene data (stored as JSON)
-  terpenes: text("terpenes"), // JSON: { limonene: 3.39, caryophyllene: 1.15, ... }
-  totalTerpenes: real("total_terpenes"),
-  dominantTerpene: text("dominant_terpene"),
+  terpenes: string | null;
+  totalTerpenes: number | null;
+  dominantTerpene: string | null;
 
   // Generated content
-  productDescription: text("product_description"),
-  strainDescription: text("strain_description"),
-  terpeneInsight: text("terpene_insight"),
+  productDescription: string | null;
+  strainDescription: string | null;
+  terpeneInsight: string | null;
 
   // Workflow tracking
-  webDraftStatus: text("web_draft_status").default("none"), // none, sent, complete
-  crmDraftStatus: text("crm_draft_status").default("none"),
-  ugcDraftStatus: text("ugc_draft_status").default("none"),
+  webDraftStatus: string | null;
+  crmDraftStatus: string | null;
+  ugcDraftStatus: string | null;
 
   // Source
-  sourceType: text("source_type"), // pdf, csv
-  sourceFilename: text("source_filename"),
-  rawData: text("raw_data"), // full JSON of all parsed data
+  sourceType: string | null;
+  sourceFilename: string | null;
+  rawData: string | null;
 
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-});
+  createdAt: string;
+  updatedAt: string;
+}
 
-export const insertLabResultSchema = createInsertSchema(labResults);
-export type InsertLabResult = z.infer<typeof insertLabResultSchema>;
-export type LabResult = typeof labResults.$inferSelect;
+export type InsertLabResult = Omit<LabResult, "id"> & { id?: string };
