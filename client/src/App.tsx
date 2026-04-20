@@ -83,7 +83,8 @@ function AppRouter() {
     const pid = (context as any)?.pendingProjectId;
     if (!pid || !sdk || !ready || resumeAttempted.current) return;
     resumeAttempted.current = true;
-    sdk.loadProject(pid).then((data: any) => {
+    sdk.loadProject(pid).then((project: any) => {
+      const data = project?.data || project;
       if (!data) return;
       // StrainInsights saves resultIds — navigate to results page
       if (data.resultIds?.length > 0) {
