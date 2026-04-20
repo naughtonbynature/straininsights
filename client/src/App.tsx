@@ -1,4 +1,6 @@
 import { Switch, Route, Router } from "wouter";
+import { useSDK } from "@/lib/sdk-context";
+import { useEffect, useRef } from "react";
 import { useHashLocation } from "wouter/use-hash-location";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -74,6 +76,22 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 // ── Router ────────────────────────────────────────────────────────────────────
 
 function AppRouter() {
+  const { sdk, context, ready } = useSDK();
+  const resumeAttempted = useRef(false);
+
+  useEffect(() => {
+    const pid = (context as any)?.pendingProjectId;
+    if (!pid || !sdk || !ready || resumeAttempted.current) return;
+    resumeAttempted.current = true;
+    sdk.loadProject(pid).then((data: any) => {
+      if (!data) return;
+      // StrainInsights saves resultIds — navigate to results page
+      if (data.resultIds?.length > 0) {
+        window.location.hash = "#/results";
+      }
+    }).catch((e: any) => console.warn("Resume failed:", e));
+  }, [sdk, context, ready]);
+
   return (
     <Switch>
       <Route path="/" component={UploadPage} />

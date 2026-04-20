@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from "react";
 
 interface HeadyContext {
+  pendingProjectId?: string;
   userId: string;
   teamId: string;
   toolSlug?: string;
