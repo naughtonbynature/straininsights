@@ -1,7 +1,7 @@
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
-import { storage, db } from "./storage.js";
-import { labResults } from "@shared/schema";
+import { storage } from "./storage.js";
+// Schema types imported where needed via storage
 import multer from "multer";
 import { randomUUID } from "crypto";
 import path from "path";
@@ -16,44 +16,7 @@ const upload = multer({
 });
 
 // Run DB migration
-function ensureSchema() {
-  try {
-    db.run(`
-      CREATE TABLE IF NOT EXISTS lab_results (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        instance_id TEXT,
-        product_name TEXT NOT NULL,
-        strain_name TEXT,
-        product_type TEXT,
-        brand_name TEXT,
-        batch_number TEXT,
-        test_date TEXT,
-        lab_name TEXT,
-        cannabinoids TEXT,
-        total_thc REAL,
-        total_cbd REAL,
-        total_cannabinoids REAL,
-        terpenes TEXT,
-        total_terpenes REAL,
-        dominant_terpene TEXT,
-        product_description TEXT,
-        strain_description TEXT,
-        terpene_insight TEXT,
-        web_draft_status TEXT DEFAULT 'none',
-        crm_draft_status TEXT DEFAULT 'none',
-        ugc_draft_status TEXT DEFAULT 'none',
-        source_type TEXT,
-        source_filename TEXT,
-        raw_data TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
-  } catch (e) {
-    // Table already exists
-  }
-}
+// Tables now live in Supabase (straininsights_results) — no local schema creation needed
 
 function getUserId(req: Request): string {
   // Use instance ID from Heady SDK header, or fallback to IP-based default
@@ -65,7 +28,6 @@ function getUserId(req: Request): string {
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  ensureSchema();
 
   // Health check
   app.get("/api/health", (_req, res) => {
