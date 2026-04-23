@@ -5,10 +5,37 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, Sparkles } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useSDK } from "@/lib/sdk-context";
 import type { LabResult } from "@shared/schema";
+
+/**
+ * Plausibility check. Mirrors server/pdf-parser.ts `validateLabResult` so the
+ * user can immediately see if we parsed the wrong column from a weird COA
+ * layout (e.g. mg/g column read as %). Thresholds: cannabinoid >99%,
+ * terpene >5%, total terpenes >10%. Over these ⇒ parse almost certainly wrong.
+ */
+interface ParseWarning { label: string; detail: string }
+function checkPlausibility(
+  cannabinoids: Record<string, number>,
+  terpenes: Record<string, number>,
+  totalThc: number | null,
+  totalCannabinoids: number | null,
+  totalTerpenes: number | null,
+): ParseWarning[] {
+  const out: ParseWarning[] = [];
+  if ((totalThc ?? 0) > 99) out.push({ label: "Total THC", detail: `${(totalThc!).toFixed(1)}% exceeds 99%` });
+  if ((totalCannabinoids ?? 0) > 100) out.push({ label: "Total Cannabinoids", detail: `${(totalCannabinoids!).toFixed(1)}% exceeds 100%` });
+  if ((totalTerpenes ?? 0) > 10) out.push({ label: "Total Terpenes", detail: `${(totalTerpenes!).toFixed(2)}% exceeds 10%` });
+  for (const [k, v] of Object.entries(cannabinoids || {})) {
+    if (typeof v === "number" && v > 99) out.push({ label: k.toUpperCase(), detail: `${v.toFixed(1)}% exceeds 99%` });
+  }
+  for (const [k, v] of Object.entries(terpenes || {})) {
+    if (typeof v === "number" && v > 5) out.push({ label: k, detail: `${v.toFixed(2)}% exceeds 5%` });
+  }
+  return out;
+}
 
 function TerpeneBar({ name, value, max }: { name: string; value: number; max: number }) {
   const pct = Math.min((value / max) * 100, 100);
@@ -124,6 +151,14 @@ export default function ConfirmPage() {
   const sortedTerpenes = Object.entries(terpenes).filter(([, v]) => (v as number) > 0).sort(([, a], [, b]) => (b as number) - (a as number)).slice(0, 6);
   const maxTerp = sortedTerpenes.length > 0 ? (sortedTerpenes[0][1] as number) : 1;
 
+  const parseWarnings = checkPlausibility(
+    cannabinoids,
+    terpenes,
+    result.totalThc,
+    result.totalCannabinoids,
+    result.totalTerpenes,
+  );
+
   const cannabinoidEntries = [
     { name: "THC", value: cannabinoids.thc || cannabinoids.d9thc || 0, color: "#C8FF00" },
     { name: "THCA", value: cannabinoids.thca || 0, color: "#a8d900" },
@@ -149,6 +184,31 @@ export default function ConfirmPage() {
         {brandGuide && (
           <div className="mb-4 text-xs px-3 py-2 rounded" style={{ background: "#1A1A1B", color: "#C8FF00", border: "1px solid #2A2A2A" }}>
             Brand voice loaded from your brand guide
+          </div>
+        )}
+
+        {parseWarnings.length > 0 && (
+          <div
+            className="mb-4 text-xs px-4 py-3 rounded"
+            style={{ background: "#2A1F0A", color: "#FFD37A", border: "1px solid #5C4210" }}
+            data-testid="parse-warnings"
+          >
+            <div className="flex items-start gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold" style={{ color: "#FFC043" }}>
+                  We may have parsed this COA incorrectly
+                </div>
+                <div className="mt-1" style={{ color: "#E0C98A" }}>
+                  The values below are implausibly high — likely the wrong column was read from the PDF. Please verify the fields before generating content, or re-upload a clearer COA.
+                </div>
+              </div>
+            </div>
+            <ul className="ml-6 list-disc space-y-0.5" style={{ color: "#E0C98A" }}>
+              {parseWarnings.map((w, i) => (
+                <li key={i}><span className="font-mono">{w.label}</span> — {w.detail}</li>
+              ))}
+            </ul>
           </div>
         )}
 
