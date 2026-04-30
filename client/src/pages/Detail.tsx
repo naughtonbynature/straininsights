@@ -28,7 +28,7 @@ export default function DetailPage() {
   const [, params] = useRoute("/detail/:id");
   const id = params?.id || "";
   const { toast } = useToast();
-  const { sdk, brandGuide } = useSDK();
+  const { sdk, brandGuide, brandContext } = useSDK();
   const [regenerating, setRegenerating] = useState("");
   const [handoffPending, setHandoffPending] = useState("");
 
@@ -58,13 +58,19 @@ export default function DetailPage() {
   const handleRegenerate = async () => {
     setRegenerating("all");
     try {
+      // Send canonical Brand Context markdown (full guide). Legacy brandVoice
+      // kept for backwards compat against older parents / standalone dev.
+      const brandContextMarkdown = brandContext?.markdown || "";
       const brandVoice = brandGuide?.voicePillars
         ? (Array.isArray(brandGuide.voicePillars)
             ? brandGuide.voicePillars.join(", ")
             : String(brandGuide.voicePillars))
         : "";
 
-      const promptsRes = await apiRequest("POST", `/api/results/${id}/generate-prompts`, { brandVoice });
+      const promptsRes = await apiRequest("POST", `/api/results/${id}/generate-prompts`, {
+        brandContext: brandContextMarkdown,
+        brandVoice,
+      });
       const { productPrompt, strainPrompt, insightPrompt } = await promptsRes.json();
 
       const [productDescription, strainDescription, terpeneInsight] = await Promise.all([

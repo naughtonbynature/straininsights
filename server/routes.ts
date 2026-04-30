@@ -403,11 +403,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const profileInterpretation = interpretProfile(cannabinoids, terpenes);
       const knowledgeBase = buildKnowledgeBaseText();
 
-      // Optional brand voice from request body (injected by frontend if brand guide available)
+      // Optional brand context from request body. Prefer the canonical full
+      // markdown rendered by heady-os/shared/brand-context.ts; fall back to
+      // the legacy thin brandVoice string when an older client sends only that.
+      const brandContextMarkdown: string = req.body?.brandContext || "";
       const brandVoice: string = req.body?.brandVoice || "";
-      const brandVoiceNote = brandVoice
-        ? `\nBrand Voice: ${brandVoice}\n`
-        : "";
+      const brandVoiceNote = brandContextMarkdown
+        ? `\n${brandContextMarkdown}\n`
+        : (brandVoice ? `\nBrand Voice: ${brandVoice}\n` : "");
 
       const productPrompt = `${knowledgeBase}
 ${brandVoiceNote}

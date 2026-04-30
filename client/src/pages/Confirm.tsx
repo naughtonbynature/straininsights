@@ -68,7 +68,7 @@ export default function ConfirmPage() {
   const [, navigate] = useLocation();
   const [, params] = useRoute("/confirm/:id");
   const id = params?.id || "";
-  const { sdk, brandGuide } = useSDK();
+  const { sdk, brandGuide, brandContext } = useSDK();
 
   const { data: result, isLoading } = useQuery<LabResult>({
     queryKey: ["/api/results", id],
@@ -95,7 +95,11 @@ export default function ConfirmPage() {
       // First update the result with any edits
       await apiRequest("PATCH", `/api/results/${id}`, { productName, strainName, productType, brandName });
 
-      // Extract brand voice from brand guide if available
+      // Send canonical Brand Context markdown (full guide — voice pillars,
+      // do/dont rules, jargon policy, TM rules) so generated product copy
+      // matches brand voice. Legacy `brandVoice` kept for backwards compat
+      // when running standalone or against an older parent.
+      const brandContextMarkdown = brandContext?.markdown || "";
       const brandVoice = brandGuide?.voicePillars
         ? (Array.isArray(brandGuide.voicePillars)
             ? brandGuide.voicePillars.join(", ")
@@ -103,7 +107,10 @@ export default function ConfirmPage() {
         : "";
 
       // Get the 3 prompts from backend (no LLM call there)
-      const promptsRes = await apiRequest("POST", `/api/results/${id}/generate-prompts`, { brandVoice });
+      const promptsRes = await apiRequest("POST", `/api/results/${id}/generate-prompts`, {
+        brandContext: brandContextMarkdown,
+        brandVoice,
+      });
       const { productPrompt, strainPrompt, insightPrompt } = await promptsRes.json();
 
       // Call LLM via SDK (credit-tracked through parent)
